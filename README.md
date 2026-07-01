@@ -1,9 +1,19 @@
-````markdown
 # 🚀 FTP-PRO: Servidor FTP Profesional para Linux
+
+<div align="center">
+
+![FTP](https://img.shields.io/badge/Protocol-FTP-blue?style=flat-square)
+![C](https://img.shields.io/badge/Language-C-brightgreen?style=flat-square)
+![Linux](https://img.shields.io/badge/Platform-Linux-orange?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-purple?style=flat-square)
+![Status](https://img.shields.io/badge/Status-Active-success?style=flat-square)
+![Security](https://img.shields.io/badge/Security-3_Modes-red?style=flat-square)
 
 Un **servidor FTP completo, moderno y compilable** desarrollado en C puro con **3 modos de seguridad configurables**, soporte para múltiples clientes simultáneos, interfaz ASCII Art decorativa y fácil instalación.
 
 [⬇️ Instalación](#-instalación-rápida) • [🔐 Seguridad](#-modos-de-seguridad) • [📖 Documentación](#-documentación-completa) • [⚙️ Configuración](#-configuración)
+
+</div>
 
 ---
 
@@ -14,11 +24,12 @@ Un **servidor FTP completo, moderno y compilable** desarrollado en C puro con **
 - [📊 Comparativa de Modos](#-comparativa-de-modos-de-seguridad)
 - [📋 Requisitos](#-requisitos)
 - [⚡ Instalación Rápida](#-instalación-rápida)
+- [📖 Documentación Completa](#-documentación-completa)
 - [🎮 Uso del Servidor](#-uso-del-servidor)
 - [⚙️ Configuración](#-configuración)
 - [📁 Estructura del Proyecto](#-estructura-del-proyecto)
 - [🔧 Detalles Técnicos](#-detalles-técnicos)
-- [🔐 Protecciones de Seguridad](#-protecciones-de-seguridad-en-modo-secure)
+- [🔒 Protecciones de Seguridad](#-protecciones-de-seguridad-en-modo-secure)
 - [🐛 Troubleshooting](#-troubleshooting)
 - [📜 Licencia](#-licencia)
 
@@ -414,6 +425,13 @@ FTP-PRO/
 
 ## 🔧 Detalles Técnicos
 
+### Composición del Repositorio
+
+```
+C          85%  ████████████████████
+Makefile   15%  ████
+```
+
 ### Compilación Manual
 
 ```bash
@@ -616,10 +634,10 @@ copies or substantial portions of the Software.
 
 <div align="center">
 
-### ⭐ Si te gusta el proyecto, no olvides dejar una estrella
+### ⭐ Si te gusta el proyecto, no olvidas dejar una estrella
 
 [![Star](https://img.shields.io/github/stars/penca96/FTP-PRO?style=social)](https://github.com/penca96/FTP-PRO)
 
 **Hecho con ❤️ para la comunidad de software libre**
 
-````
+</div>
