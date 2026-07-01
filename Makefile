@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -pthread -std=c99
-LDFLAGS = -lpthread
+LDFLAGS = -lpthread -lcrypt
 TARGET = ftp_server
 SRCDIR = src
 OBJDIR = obj

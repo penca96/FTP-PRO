@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -68,7 +69,7 @@ const char* ERROR_ASCII = COLOR_RED
 "   ✗ Authentication failed\n"
 COLOR_RESET;
 
-const char* SHUTDOWN_ASCII = COLOR_YELLOW BOLD
+static const char SHUTDOWN_ASCII[] = COLOR_YELLOW BOLD
 "  ╔════════════════════════════════════════╗\n"
 "  ║  Server shutting down gracefully...    ║\n"
 "  ║  Goodbye! 👋                           ║\n"
@@ -254,8 +255,10 @@ int main(int argc, char* argv[]) {
 
         client->socket = client_socket;
         client->data_socket = -1;
-        strcpy(client->working_dir, "/tmp");
-        strcpy(client->root_dir, "/tmp");
+        strncpy(client->working_dir, "/tmp", sizeof(client->working_dir) - 1);
+        client->working_dir[sizeof(client->working_dir) - 1] = '\0';
+        strncpy(client->root_dir, "/tmp", sizeof(client->root_dir) - 1);
+        client->root_dir[sizeof(client->root_dir) - 1] = '\0';
         client->auth.authenticated = (security_mode == SECURITY_MODE_NONE) ? 1 : 0;
         memset(client->auth.username, 0, sizeof(client->auth.username));
         memset(client->auth.password, 0, sizeof(client->auth.password));
@@ -308,7 +311,11 @@ void* handle_client(void* arg) {
         char command[50], args[BUFFER_SIZE];
         memset(command, 0, sizeof(command));
         memset(args, 0, sizeof(args));
-        sscanf(buffer, "%s %[^\n]", command, args);
+        int parsed = sscanf(buffer, "%49s %4095[^\n]", command, args);
+        if (parsed < 1) {
+            send_response(client->socket, 500, "Invalid command");
+            continue;
+        }
 
         // Convertir comando a mayúsculas
         for (int i = 0; command[i]; i++) {
@@ -470,14 +477,15 @@ void cmd_secinfo(client_t* client) {
 }
 
 int validate_path(client_t* client, const char* path) {
-    char full_path[BUFFER_SIZE];
-    char resolved_path[BUFFER_SIZE];
+    char full_path[PATH_MAX];
+    char resolved_path[PATH_MAX];
     
     // Construir ruta completa
     if (path[0] == '/') {
-        strncpy(full_path, path, BUFFER_SIZE - 1);
+        strncpy(full_path, path, sizeof(full_path) - 1);
+        full_path[sizeof(full_path) - 1] = '\0';
     } else {
-        snprintf(full_path, BUFFER_SIZE, "%s/%s", client->working_dir, path);
+        snprintf(full_path, sizeof(full_path), "%s/%s", client->working_dir, path);
     }
     
     // Resolver puntos relativos
@@ -556,7 +564,8 @@ void cmd_cwd(client_t* client, const char* args) {
     char new_path[BUFFER_SIZE];
     
     if (args[0] == '/') {
-        strcpy(new_path, args);
+        strncpy(new_path, args, sizeof(new_path) - 1);
+        new_path[sizeof(new_path) - 1] = '\0';
     } else {
         snprintf(new_path, BUFFER_SIZE, "%s/%s", client->working_dir, args);
     }
@@ -567,7 +576,8 @@ void cmd_cwd(client_t* client, const char* args) {
             send_response(client->socket, 550, "Path traversal not allowed");
             return;
         }
-        strcpy(client->working_dir, new_path);
+        strncpy(client->working_dir, new_path, sizeof(client->working_dir) - 1);
+        client->working_dir[sizeof(client->working_dir) - 1] = '\0';
         send_response(client->socket, 250, "Directory changed");
     } else {
         send_response(client->socket, 550, "Directory not found");
@@ -685,6 +695,7 @@ void cmd_quit(client_t* client) {
 
 void signal_handler(int signum) {
     (void)signum;
+    write(STDOUT_FILENO, SHUTDOWN_ASCII, sizeof(SHUTDOWN_ASCII) - 1);
     if (server_socket >= 0) {
         close(server_socket);
     }
