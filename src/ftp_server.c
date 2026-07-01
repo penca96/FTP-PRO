@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE 700
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -481,7 +482,7 @@ int validate_path(client_t* client, const char* path) {
     
     // Resolver puntos relativos
     if (realpath(full_path, resolved_path) == NULL) {
-        strncpy(resolved_path, full_path, BUFFER_SIZE - 1);
+        return 0;
     }
     
     // Verificar que esté dentro del directorio raíz
@@ -683,9 +684,9 @@ void cmd_quit(client_t* client) {
 }
 
 void signal_handler(int signum) {
-    printf("\n%s", SHUTDOWN_ASCII);
+    (void)signum;
     if (server_socket >= 0) {
         close(server_socket);
     }
-    exit(EXIT_SUCCESS);
+    _exit(EXIT_SUCCESS);
 }
