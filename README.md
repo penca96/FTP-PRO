@@ -277,21 +277,29 @@ make verify-install # Verifica la instalación
 ### Iniciar el Servidor
 
 ```bash
-# Opción 1: Modo básico (por defecto)
+# Opción 1: Modo básico (por defecto, solo localhost)
 sudo ftp_server
 
-# Opción 2: Modo sin autenticación (desarrollo)
+# Opción 2: Escuchar en una IP local específica
+sudo ftp_server --ip 192.168.1.100
+
+# Opción 3: Modo sin autenticación (desarrollo)
 sudo ftp_server --no-auth
 
-# Opción 3: Modo autenticación básica
+# Opción 4: Modo autenticación básica
 sudo ftp_server --basic
 
-# Opción 4: Modo autenticación segura (producción)
+# Opción 5: Modo autenticación segura (producción)
 sudo ftp_server --secure
+
+# Opción 6: IP local + autenticación segura
+sudo ftp_server --ip 192.168.1.100 --secure
 
 # Ver ayuda
 sudo ftp_server --help
 ```
+
+> Por seguridad, el servidor escucha en `127.0.0.1` por defecto. Usa `--ip <dirección>` para fijar una IP local concreta.
 
 ### Conectarse al Servidor
 
