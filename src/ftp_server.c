@@ -17,6 +17,55 @@
 #define BUFFER_SIZE 4096
 #define MAX_CLIENTS 10
 
+// Colores ANSI
+#define COLOR_RESET     "\x1b[0m"
+#define COLOR_GREEN     "\x1b[32m"
+#define COLOR_BLUE      "\x1b[34m"
+#define COLOR_CYAN      "\x1b[36m"
+#define COLOR_YELLOW    "\x1b[33m"
+#define COLOR_RED       "\x1b[31m"
+#define BOLD            "\x1b[1m"
+
+// ASCII Art
+const char* BANNER = COLOR_CYAN BOLD 
+"  ███████╗████████╗██████╗ ███████╗██████╗ ██████╗ \n"
+"  ██╔════╝╚══██╔══╝██╔══██╗██╔════╝██╔══██╗██╔══██╗\n"
+"  █████╗     ██║   ██████╔╝█████╗  ██████╔╝██████╔╝\n"
+"  ██╔══╝     ██║   ██╔═══╝ ██╔══╝  ██╔═══╝ ██╔══██╗\n"
+"  ██║        ██║   ██║     ███████╗██║     ██║  ██║\n"
+"  ╚═╝        ╚═╝   ╚═╝     ╚══════╝╚═╝     ╚═╝  ╚═╝\n"
+COLOR_RESET;
+
+const char* PRO_BANNER = COLOR_GREEN BOLD
+"  ╔════════════════════════════════════════╗\n"
+"  ║         FTP-PRO v1.0 SERVER            ║\n"
+"  ║    Professional FTP Server for Linux    ║\n"
+"  ╚════════════════════════════════════════╝\n"
+COLOR_RESET;
+
+const char* WELCOME_ASCII = COLOR_BLUE
+"   ╔─────────────────────────────────────╗\n"
+"   │ ★ Welcome to FTP-PRO Server ★       │\n"
+"   │ Please authenticate to continue     │\n"
+"   ╚─────────────────────────────────────╝\n"
+COLOR_RESET;
+
+const char* SUCCESS_ASCII = COLOR_GREEN
+"   ✓ Authentication successful!\n"
+"   ✓ Ready to transfer files\n"
+COLOR_RESET;
+
+const char* ERROR_ASCII = COLOR_RED
+"   ✗ Authentication failed\n"
+COLOR_RESET;
+
+const char* SHUTDOWN_ASCII = COLOR_YELLOW BOLD
+"  ╔════════════════════════════════════════╗\n"
+"  ║  Server shutting down gracefully...    ║\n"
+"  ║  Goodbye! 👋                           ║\n"
+"  ╚════════════════════════════════════════╝\n"
+COLOR_RESET;
+
 // Estructura para manejar conexiones de clientes
 typedef struct {
     int socket;
@@ -28,6 +77,7 @@ typedef struct {
 int server_socket = -1;
 
 // Prototipo de funciones
+void print_banner(void);
 void* handle_client(void* arg);
 void send_response(int socket, int code, const char* message);
 void handle_command(client_t* client, const char* command);
@@ -42,7 +92,22 @@ void cmd_dele(client_t* client, const char* filename);
 void cmd_rmd(client_t* client, const char* dirname);
 void cmd_mkd(client_t* client, const char* dirname);
 void cmd_quit(client_t* client);
+void cmd_help(client_t* client);
 void signal_handler(int signum);
+
+void print_banner(void) {
+    system("clear");
+    printf("%s\n", BANNER);
+    printf("%s\n", PRO_BANNER);
+    printf(COLOR_CYAN "╔════════════════════════════════════════════════════╗\n" COLOR_RESET);
+    printf(COLOR_CYAN "║ " COLOR_GREEN "⚙️  Server Configuration" COLOR_CYAN "                         ║\n" COLOR_RESET);
+    printf(COLOR_CYAN "║ " COLOR_YELLOW "Port:" COLOR_RESET " 21 (FTP Standard)                      " COLOR_CYAN "║\n" COLOR_RESET);
+    printf(COLOR_CYAN "║ " COLOR_YELLOW "Protocol:" COLOR_RESET " FTP (RFC 959)                       " COLOR_CYAN "║\n" COLOR_RESET);
+    printf(COLOR_CYAN "║ " COLOR_YELLOW "Max Clients:" COLOR_RESET " Unlimited (Multi-threaded)        " COLOR_CYAN "║\n" COLOR_RESET);
+    printf(COLOR_CYAN "║ " COLOR_YELLOW "Root Directory:" COLOR_RESET " /tmp                            " COLOR_CYAN "║\n" COLOR_RESET);
+    printf(COLOR_CYAN "╚════════════════════════════════════════════════════╝\n" COLOR_RESET);
+    printf("\n");
+}
 
 int main(int argc, char* argv[]) {
     struct sockaddr_in server_addr, client_addr;
@@ -54,9 +119,13 @@ int main(int argc, char* argv[]) {
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
+    // Mostrar banner
+    print_banner();
+
     // Crear socket
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server_socket < 0) {
+        fprintf(stderr, COLOR_RED "✗ Error al crear socket\n" COLOR_RESET);
         perror("Error al crear socket");
         exit(EXIT_FAILURE);
     }
@@ -64,6 +133,7 @@ int main(int argc, char* argv[]) {
     // Permitir reutilizar el puerto
     int opt = 1;
     if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        fprintf(stderr, COLOR_RED "✗ Error en setsockopt\n" COLOR_RESET);
         perror("Error en setsockopt");
         exit(EXIT_FAILURE);
     }
@@ -76,6 +146,7 @@ int main(int argc, char* argv[]) {
 
     // Bind
     if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        fprintf(stderr, COLOR_RED "✗ Error en bind - Puerto 21 requiere privilegios de root\n" COLOR_RESET);
         perror("Error en bind");
         close(server_socket);
         exit(EXIT_FAILURE);
@@ -83,13 +154,19 @@ int main(int argc, char* argv[]) {
 
     // Listen
     if (listen(server_socket, BACKLOG) < 0) {
+        fprintf(stderr, COLOR_RED "✗ Error en listen\n" COLOR_RESET);
         perror("Error en listen");
         close(server_socket);
         exit(EXIT_FAILURE);
     }
 
-    printf("Servidor FTP iniciado en puerto %d\n", FTP_PORT);
-    printf("Esperando conexiones...\n");
+    printf(COLOR_GREEN BOLD "✓ " COLOR_RESET COLOR_GREEN "Servidor FTP iniciado en puerto %d\n" COLOR_RESET, FTP_PORT);
+    printf(COLOR_CYAN "╔════════════════════════════════════════════════════╗\n" COLOR_RESET);
+    printf(COLOR_CYAN "║ " COLOR_GREEN "🟢 Estado: ACTIVO" COLOR_CYAN "                                  ║\n" COLOR_RESET);
+    printf(COLOR_CYAN "║ " COLOR_YELLOW "Escuchando en: 0.0.0.0:21" COLOR_CYAN "                       ║\n" COLOR_RESET);
+    printf(COLOR_CYAN "║ " COLOR_YELLOW "Esperando conexiones..." COLOR_CYAN "                         ║\n" COLOR_RESET);
+    printf(COLOR_CYAN "╚════════════════════════════════════════════════════╝\n" COLOR_RESET);
+    printf("\n");
 
     // Aceptar conexiones
     while (1) {
@@ -97,16 +174,17 @@ int main(int argc, char* argv[]) {
         client_socket = accept(server_socket, (struct sockaddr*)&client_addr, &client_addr_len);
 
         if (client_socket < 0) {
+            fprintf(stderr, COLOR_RED "✗ Error en accept\n" COLOR_RESET);
             perror("Error en accept");
             continue;
         }
 
-        printf("Nueva conexión de %s\n", inet_ntoa(client_addr.sin_addr));
+        printf(COLOR_GREEN "✓ " COLOR_RESET "Nueva conexión de " COLOR_YELLOW "%s\n" COLOR_RESET, inet_ntoa(client_addr.sin_addr));
 
         // Crear estructura para el cliente
         client_t* client = (client_t*)malloc(sizeof(client_t));
         if (client == NULL) {
-            fprintf(stderr, "Error al asignar memoria\n");
+            fprintf(stderr, COLOR_RED "✗ Error al asignar memoria\n" COLOR_RESET);
             close(client_socket);
             continue;
         }
@@ -117,7 +195,7 @@ int main(int argc, char* argv[]) {
 
         // Crear thread para manejar el cliente
         if (pthread_create(&thread_id, NULL, handle_client, (void*)client) != 0) {
-            fprintf(stderr, "Error al crear thread\n");
+            fprintf(stderr, COLOR_RED "✗ Error al crear thread\n" COLOR_RESET);
             free(client);
             close(client_socket);
             continue;
@@ -136,15 +214,19 @@ void* handle_client(void* arg) {
     int bytes_read;
     int authenticated = 0;
 
-    // Enviar mensaje de bienvenida
-    send_response(client->socket, 220, "FTP-PRO Server ready");
+    // Enviar mensaje de bienvenida con ASCII art
+    send_response(client->socket, 220, "FTP-PRO Server Ready - Welcome!");
+    
+    // Enviar banner de bienvenida
+    const char* welcome = WELCOME_ASCII;
+    send(client->socket, welcome, strlen(welcome), 0);
 
     while (1) {
         memset(buffer, 0, BUFFER_SIZE);
         bytes_read = recv(client->socket, buffer, BUFFER_SIZE - 1, 0);
 
         if (bytes_read <= 0) {
-            printf("Cliente desconectado\n");
+            printf(COLOR_YELLOW "⚠ " COLOR_RESET "Cliente desconectado\n");
             break;
         }
 
@@ -154,11 +236,18 @@ void* handle_client(void* arg) {
         newline = strchr(buffer, '\r');
         if (newline) *newline = '\0';
 
-        printf("Comando recibido: %s\n", buffer);
+        printf(COLOR_BLUE "➤ " COLOR_RESET "Comando: %s\n", buffer);
 
         // Procesar comandos
         char command[50], args[BUFFER_SIZE];
+        memset(command, 0, sizeof(command));
+        memset(args, 0, sizeof(args));
         sscanf(buffer, "%s %[^\n]", command, args);
+
+        // Convertir comando a mayúsculas
+        for (int i = 0; command[i]; i++) {
+            command[i] = toupper(command[i]);
+        }
 
         // Comandos sin autenticación
         if (strcmp(command, "USER") == 0) {
@@ -177,14 +266,20 @@ void* handle_client(void* arg) {
             break;
         }
 
+        if (strcmp(command, "HELP") == 0) {
+            cmd_help(client);
+            continue;
+        }
+
         // Comandos que requieren autenticación
         if (!authenticated) {
             send_response(client->socket, 530, "Please login with USER and PASS");
+            send(client->socket, ERROR_ASCII, strlen(ERROR_ASCII), 0);
             continue;
         }
 
         // Comandos autenticados
-        if (strcmp(command, "LIST") == 0 || strcmp(command, "ls") == 0) {
+        if (strcmp(command, "LIST") == 0 || strcmp(command, "LS") == 0) {
             cmd_list(client);
         } else if (strcmp(command, "CWD") == 0) {
             cmd_cwd(client, args);
@@ -231,6 +326,32 @@ void cmd_user(client_t* client, const char* args) {
 
 void cmd_pass(client_t* client, const char* args) {
     send_response(client->socket, 230, "User logged in, proceed");
+    send(client->socket, SUCCESS_ASCII, strlen(SUCCESS_ASCII), 0);
+}
+
+void cmd_help(client_t* client) {
+    const char* help_text = COLOR_CYAN
+        "═══════════════════════════════════════\n"
+        "         FTP-PRO HELP COMMANDS\n"
+        "═══════════════════════════════════════\n"
+        "LIST / LS      - List files in current directory\n"
+        "PWD            - Print working directory\n"
+        "CWD <dir>      - Change working directory\n"
+        "RETR <file>    - Download file\n"
+        "STOR <file>    - Upload file\n"
+        "DELE <file>    - Delete file\n"
+        "MKD <dir>      - Create directory\n"
+        "RMD <dir>      - Remove directory\n"
+        "TYPE           - Set transfer type\n"
+        "SYST           - Show system info\n"
+        "NOOP           - No operation\n"
+        "HELP           - Show this help\n"
+        "QUIT           - Disconnect\n"
+        "═══════════════════════════════════════\n"
+        COLOR_RESET;
+    
+    send_response(client->socket, 214, "Help follows");
+    send(client->socket, help_text, strlen(help_text), 0);
 }
 
 void cmd_list(client_t* client) {
@@ -367,7 +488,7 @@ void cmd_quit(client_t* client) {
 }
 
 void signal_handler(int signum) {
-    printf("\nServidor FTP terminado\n");
+    printf("\n%s", SHUTDOWN_ASCII);
     if (server_socket >= 0) {
         close(server_socket);
     }
