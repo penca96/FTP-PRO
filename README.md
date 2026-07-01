@@ -1,20 +1,9 @@
 ````markdown
 # 🚀 FTP-PRO: Servidor FTP Profesional para Linux
 
-<div align="center">
-
-![FTP](https://img.shields.io/badge/Protocol-FTP-blue?style=flat-square)
-![C](https://img.shields.io/badge/Language-C-brightgreen?style=flat-square)
-![Linux](https://img.shields.io/badge/Platform-Linux-orange?style=flat-square)
-![License](https://img.shields.io/badge/License-MIT-purple?style=flat-square)
-![Status](https://img.shields.io/badge/Status-Active-success?style=flat-square)
-![Security](https://img.shields.io/badge/Security-3_Modes-red?style=flat-square)
-
 Un **servidor FTP completo, moderno y compilable** desarrollado en C puro con **3 modos de seguridad configurables**, soporte para múltiples clientes simultáneos, interfaz ASCII Art decorativa y fácil instalación.
 
 [⬇️ Instalación](#-instalación-rápida) • [🔐 Seguridad](#-modos-de-seguridad) • [📖 Documentación](#-documentación-completa) • [⚙️ Configuración](#-configuración)
-
-</div>
 
 ---
 
@@ -633,5 +622,4 @@ copies or substantial portions of the Software.
 
 **Hecho con ❤️ para la comunidad de software libre**
 
-</div>
 ````
