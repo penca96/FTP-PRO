@@ -11,6 +11,9 @@
 #include <dirent.h>
 #include <time.h>
 #include <signal.h>
+#include <ctype.h>
+#include <pwd.h>
+#include <crypt.h>
 
 #define FTP_PORT 21
 #define BACKLOG 5
@@ -25,6 +28,11 @@
 #define COLOR_YELLOW    "\x1b[33m"
 #define COLOR_RED       "\x1b[31m"
 #define BOLD            "\x1b[1m"
+
+// Modo de seguridad
+#define SECURITY_MODE_NONE     0  // Sin autenticación
+#define SECURITY_MODE_BASIC    1  // Autenticación básica (cualquier usuario)
+#define SECURITY_MODE_SECURE   2  // Autenticación real con usuarios del sistema
 
 // ASCII Art
 const char* BANNER = COLOR_CYAN BOLD 
@@ -66,21 +74,30 @@ const char* SHUTDOWN_ASCII = COLOR_YELLOW BOLD
 "  ╚════════════════════════════════════════╝\n"
 COLOR_RESET;
 
+// Estructura para credenciales
+typedef struct {
+    char username[50];
+    char password[50];
+    int authenticated;
+} auth_t;
+
 // Estructura para manejar conexiones de clientes
 typedef struct {
     int socket;
     char working_dir[BUFFER_SIZE];
+    char root_dir[BUFFER_SIZE];  // Directorio raíz permitido
     int data_socket;
+    auth_t auth;
 } client_t;
 
 // Variable global para el socket del servidor
 int server_socket = -1;
+int security_mode = SECURITY_MODE_BASIC;  // Modo de seguridad por defecto
 
 // Prototipo de funciones
 void print_banner(void);
 void* handle_client(void* arg);
 void send_response(int socket, int code, const char* message);
-void handle_command(client_t* client, const char* command);
 void cmd_user(client_t* client, const char* args);
 void cmd_pass(client_t* client, const char* args);
 void cmd_list(client_t* client);
@@ -93,7 +110,13 @@ void cmd_rmd(client_t* client, const char* dirname);
 void cmd_mkd(client_t* client, const char* dirname);
 void cmd_quit(client_t* client);
 void cmd_help(client_t* client);
+void cmd_secinfo(client_t* client);
 void signal_handler(int signum);
+
+// Funciones de seguridad
+int validate_path(client_t* client, const char* path);
+int verify_system_user(const char* username, const char* password);
+int is_safe_filename(const char* filename);
 
 void print_banner(void) {
     system("clear");
@@ -105,6 +128,24 @@ void print_banner(void) {
     printf(COLOR_CYAN "║ " COLOR_YELLOW "Protocol:" COLOR_RESET " FTP (RFC 959)                       " COLOR_CYAN "║\n" COLOR_RESET);
     printf(COLOR_CYAN "║ " COLOR_YELLOW "Max Clients:" COLOR_RESET " Unlimited (Multi-threaded)        " COLOR_CYAN "║\n" COLOR_RESET);
     printf(COLOR_CYAN "║ " COLOR_YELLOW "Root Directory:" COLOR_RESET " /tmp                            " COLOR_CYAN "║\n" COLOR_RESET);
+    
+    // Mostrar modo de seguridad
+    const char* security_text = "Unknown";
+    const char* security_icon = "❓";
+    if (security_mode == SECURITY_MODE_NONE) {
+        security_text = "NONE (No authentication)";
+        security_icon = "🔓";
+    } else if (security_mode == SECURITY_MODE_BASIC) {
+        security_text = "BASIC (Any user accepted)";
+        security_icon = "🔐";
+    } else if (security_mode == SECURITY_MODE_SECURE) {
+        security_text = "SECURE (System users)";
+        security_icon = "🔒";
+    }
+    printf(COLOR_CYAN "║ " COLOR_YELLOW "Security:" COLOR_RESET " %s %s" COLOR_CYAN, security_icon, security_text);
+    for (int i = strlen(security_text) + 2; i < 40; i++) printf(" ");
+    printf("║\n" COLOR_RESET);
+    
     printf(COLOR_CYAN "╚════════════════════════════════════════════════════╝\n" COLOR_RESET);
     printf("\n");
 }
@@ -114,6 +155,27 @@ int main(int argc, char* argv[]) {
     socklen_t client_addr_len;
     int client_socket;
     pthread_t thread_id;
+
+    // Parsear argumentos
+    if (argc > 1) {
+        if (strcmp(argv[1], "--secure") == 0) {
+            security_mode = SECURITY_MODE_SECURE;
+        } else if (strcmp(argv[1], "--basic") == 0) {
+            security_mode = SECURITY_MODE_BASIC;
+        } else if (strcmp(argv[1], "--no-auth") == 0) {
+            security_mode = SECURITY_MODE_NONE;
+        } else if (strcmp(argv[1], "--help") == 0) {
+            printf("FTP-PRO Server v1.0\n\n");
+            printf("Uso: sudo ftp_server [opciones]\n\n");
+            printf("Opciones de seguridad:\n");
+            printf("  --no-auth    No requiere autenticación (menos seguro)\n");
+            printf("  --basic      Acepta cualquier usuario (seguridad media)\n");
+            printf("  --secure     Autentica contra usuarios del sistema (más seguro)\n");
+            printf("  --help       Muestra esta ayuda\n\n");
+            printf("Por defecto: --basic (seguridad media)\n");
+            return EXIT_SUCCESS;
+        }
+    }
 
     // Configurar manejador de señales
     signal(SIGINT, signal_handler);
@@ -192,6 +254,10 @@ int main(int argc, char* argv[]) {
         client->socket = client_socket;
         client->data_socket = -1;
         strcpy(client->working_dir, "/tmp");
+        strcpy(client->root_dir, "/tmp");
+        client->auth.authenticated = (security_mode == SECURITY_MODE_NONE) ? 1 : 0;
+        memset(client->auth.username, 0, sizeof(client->auth.username));
+        memset(client->auth.password, 0, sizeof(client->auth.password));
 
         // Crear thread para manejar el cliente
         if (pthread_create(&thread_id, NULL, handle_client, (void*)client) != 0) {
@@ -212,7 +278,6 @@ void* handle_client(void* arg) {
     client_t* client = (client_t*)arg;
     char buffer[BUFFER_SIZE];
     int bytes_read;
-    int authenticated = 0;
 
     // Enviar mensaje de bienvenida con ASCII art
     send_response(client->socket, 220, "FTP-PRO Server Ready - Welcome!");
@@ -249,10 +314,9 @@ void* handle_client(void* arg) {
             command[i] = toupper(command[i]);
         }
 
-        // Comandos sin autenticación
+        // Comandos sin autenticación (siempre disponibles)
         if (strcmp(command, "USER") == 0) {
             cmd_user(client, args);
-            authenticated = 1;
             continue;
         }
 
@@ -266,13 +330,8 @@ void* handle_client(void* arg) {
             break;
         }
 
-        if (strcmp(command, "HELP") == 0) {
-            cmd_help(client);
-            continue;
-        }
-
         // Comandos que requieren autenticación
-        if (!authenticated) {
+        if (!client->auth.authenticated) {
             send_response(client->socket, 530, "Please login with USER and PASS");
             send(client->socket, ERROR_ASCII, strlen(ERROR_ASCII), 0);
             continue;
@@ -301,6 +360,10 @@ void* handle_client(void* arg) {
             send_response(client->socket, 215, "UNIX Type: L8");
         } else if (strcmp(command, "NOOP") == 0) {
             send_response(client->socket, 200, "NOOP ok");
+        } else if (strcmp(command, "HELP") == 0) {
+            cmd_help(client);
+        } else if (strcmp(command, "SECINFO") == 0) {
+            cmd_secinfo(client);
         } else {
             send_response(client->socket, 502, "Command not implemented");
         }
@@ -321,12 +384,39 @@ void send_response(int socket, int code, const char* message) {
 }
 
 void cmd_user(client_t* client, const char* args) {
+    strncpy(client->auth.username, args, sizeof(client->auth.username) - 1);
     send_response(client->socket, 331, "User name ok, need password");
 }
 
 void cmd_pass(client_t* client, const char* args) {
-    send_response(client->socket, 230, "User logged in, proceed");
-    send(client->socket, SUCCESS_ASCII, strlen(SUCCESS_ASCII), 0);
+    strncpy(client->auth.password, args, sizeof(client->auth.password) - 1);
+    
+    int auth_success = 0;
+    
+    if (security_mode == SECURITY_MODE_NONE) {
+        // Sin autenticación - siempre acepta
+        auth_success = 1;
+    } else if (security_mode == SECURITY_MODE_BASIC) {
+        // Autenticación básica - acepta cualquier usuario/contraseña
+        if (strlen(client->auth.username) > 0 && strlen(client->auth.password) > 0) {
+            auth_success = 1;
+        }
+    } else if (security_mode == SECURITY_MODE_SECURE) {
+        // Autenticación segura - verifica contra usuarios del sistema
+        auth_success = verify_system_user(client->auth.username, client->auth.password);
+    }
+    
+    if (auth_success) {
+        client->auth.authenticated = 1;
+        send_response(client->socket, 230, "User logged in, proceed");
+        send(client->socket, SUCCESS_ASCII, strlen(SUCCESS_ASCII), 0);
+        printf(COLOR_GREEN "✓ " COLOR_RESET "Usuario autenticado: %s\n", client->auth.username);
+    } else {
+        client->auth.authenticated = 0;
+        send_response(client->socket, 530, "Login incorrect");
+        send(client->socket, ERROR_ASCII, strlen(ERROR_ASCII), 0);
+        printf(COLOR_RED "✗ " COLOR_RESET "Falló autenticación para: %s\n", client->auth.username);
+    }
 }
 
 void cmd_help(client_t* client) {
@@ -345,6 +435,7 @@ void cmd_help(client_t* client) {
         "TYPE           - Set transfer type\n"
         "SYST           - Show system info\n"
         "NOOP           - No operation\n"
+        "SECINFO        - Show security info\n"
         "HELP           - Show this help\n"
         "QUIT           - Disconnect\n"
         "═══════════════════════════════════════\n"
@@ -352,6 +443,78 @@ void cmd_help(client_t* client) {
     
     send_response(client->socket, 214, "Help follows");
     send(client->socket, help_text, strlen(help_text), 0);
+}
+
+void cmd_secinfo(client_t* client) {
+    char secinfo[BUFFER_SIZE];
+    const char* mode_desc = "Unknown";
+    
+    if (security_mode == SECURITY_MODE_NONE) {
+        mode_desc = "NONE - No authentication required";
+    } else if (security_mode == SECURITY_MODE_BASIC) {
+        mode_desc = "BASIC - Any username/password accepted";
+    } else if (security_mode == SECURITY_MODE_SECURE) {
+        mode_desc = "SECURE - System user authentication";
+    }
+    
+    snprintf(secinfo, BUFFER_SIZE,
+        COLOR_YELLOW "Security Information:\n"
+        "  Mode: %s\n"
+        "  User: %s\n"
+        "  Root: %s\n"
+        COLOR_RESET, mode_desc, client->auth.username, client->root_dir);
+    
+    send_response(client->socket, 214, "Security info follows");
+    send(client->socket, secinfo, strlen(secinfo), 0);
+}
+
+int validate_path(client_t* client, const char* path) {
+    char full_path[BUFFER_SIZE];
+    char resolved_path[BUFFER_SIZE];
+    
+    // Construir ruta completa
+    if (path[0] == '/') {
+        strncpy(full_path, path, BUFFER_SIZE - 1);
+    } else {
+        snprintf(full_path, BUFFER_SIZE, "%s/%s", client->working_dir, path);
+    }
+    
+    // Resolver puntos relativos
+    if (realpath(full_path, resolved_path) == NULL) {
+        strncpy(resolved_path, full_path, BUFFER_SIZE - 1);
+    }
+    
+    // Verificar que esté dentro del directorio raíz
+    if (strncmp(resolved_path, client->root_dir, strlen(client->root_dir)) != 0) {
+        return 0;  // Path traversal attempt
+    }
+    
+    return 1;
+}
+
+int verify_system_user(const char* username, const char* password) {
+    struct passwd *pw = getpwnam(username);
+    if (pw == NULL) {
+        return 0;  // Usuario no existe
+    }
+    
+    // Verificar contraseña
+    char *encrypted = crypt(password, pw->pw_passwd);
+    if (encrypted == NULL) {
+        return 0;
+    }
+    
+    return (strcmp(encrypted, pw->pw_passwd) == 0) ? 1 : 0;
+}
+
+int is_safe_filename(const char* filename) {
+    // Rechazar nombres peligrosos
+    if (strstr(filename, "..") != NULL) return 0;
+    if (strstr(filename, "/") != NULL) return 0;
+    if (strlen(filename) == 0) return 0;
+    if (filename[0] == '.') return 0;  // Archivos ocultos
+    
+    return 1;
 }
 
 void cmd_list(client_t* client) {
@@ -398,6 +561,11 @@ void cmd_cwd(client_t* client, const char* args) {
     }
 
     if (access(new_path, F_OK) == 0) {
+        // Validar path en modo seguro
+        if (security_mode == SECURITY_MODE_SECURE && !validate_path(client, new_path)) {
+            send_response(client->socket, 550, "Path traversal not allowed");
+            return;
+        }
         strcpy(client->working_dir, new_path);
         send_response(client->socket, 250, "Directory changed");
     } else {
@@ -412,8 +580,19 @@ void cmd_pwd(client_t* client) {
 }
 
 void cmd_retr(client_t* client, const char* filename) {
+    if (!is_safe_filename(filename)) {
+        send_response(client->socket, 550, "Invalid filename");
+        return;
+    }
+    
     char filepath[BUFFER_SIZE];
     snprintf(filepath, BUFFER_SIZE, "%s/%s", client->working_dir, filename);
+
+    // Validar path en modo seguro
+    if (security_mode == SECURITY_MODE_SECURE && !validate_path(client, filepath)) {
+        send_response(client->socket, 550, "Path traversal not allowed");
+        return;
+    }
 
     FILE* file = fopen(filepath, "rb");
     if (file == NULL) {
@@ -435,8 +614,19 @@ void cmd_retr(client_t* client, const char* filename) {
 }
 
 void cmd_stor(client_t* client, const char* filename) {
+    if (!is_safe_filename(filename)) {
+        send_response(client->socket, 550, "Invalid filename");
+        return;
+    }
+    
     char filepath[BUFFER_SIZE];
     snprintf(filepath, BUFFER_SIZE, "%s/%s", client->working_dir, filename);
+
+    // Validar path en modo seguro
+    if (security_mode == SECURITY_MODE_SECURE && !validate_path(client, filepath)) {
+        send_response(client->socket, 550, "Path traversal not allowed");
+        return;
+    }
 
     FILE* file = fopen(filepath, "wb");
     if (file == NULL) {
@@ -451,6 +641,11 @@ void cmd_stor(client_t* client, const char* filename) {
 }
 
 void cmd_dele(client_t* client, const char* filename) {
+    if (!is_safe_filename(filename)) {
+        send_response(client->socket, 550, "Invalid filename");
+        return;
+    }
+    
     char filepath[BUFFER_SIZE];
     snprintf(filepath, BUFFER_SIZE, "%s/%s", client->working_dir, filename);
 
