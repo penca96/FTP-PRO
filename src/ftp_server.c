@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <errno.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -95,9 +96,11 @@ typedef struct {
 // Variable global para el socket del servidor
 int server_socket = -1;
 int security_mode = SECURITY_MODE_BASIC;  // Modo de seguridad por defecto
+char configured_listen_ip[INET_ADDRSTRLEN] = "127.0.0.1";
 
 // Prototipo de funciones
 void print_banner(void);
+void print_usage(const char* program_name);
 void* handle_client(void* arg);
 void send_response(int socket, int code, const char* message);
 void cmd_user(client_t* client, const char* args);
@@ -119,6 +122,7 @@ void signal_handler(int signum);
 int validate_path(client_t* client, const char* path);
 int verify_system_user(const char* username, const char* password);
 int is_safe_filename(const char* filename);
+int is_local_ipv4(const struct in_addr* address);
 
 void print_banner(void) {
     system("clear");
@@ -129,6 +133,9 @@ void print_banner(void) {
     printf(COLOR_CYAN "║ " COLOR_YELLOW "Port:" COLOR_RESET " 21 (FTP Standard)                      " COLOR_CYAN "║\n" COLOR_RESET);
     printf(COLOR_CYAN "║ " COLOR_YELLOW "Protocol:" COLOR_RESET " FTP (RFC 959)                       " COLOR_CYAN "║\n" COLOR_RESET);
     printf(COLOR_CYAN "║ " COLOR_YELLOW "Max Clients:" COLOR_RESET " Unlimited (Multi-threaded)        " COLOR_CYAN "║\n" COLOR_RESET);
+    printf(COLOR_CYAN "║ " COLOR_YELLOW "Bind IP:" COLOR_RESET " %s" COLOR_CYAN, configured_listen_ip);
+    for (int i = strlen(configured_listen_ip); i < 34; i++) printf(" ");
+    printf("║\n" COLOR_RESET);
     printf(COLOR_CYAN "║ " COLOR_YELLOW "Root Directory:" COLOR_RESET " /tmp                            " COLOR_CYAN "║\n" COLOR_RESET);
     
     // Mostrar modo de seguridad
@@ -152,31 +159,104 @@ void print_banner(void) {
     printf("\n");
 }
 
+void print_usage(const char* program_name) {
+    const char* command_name = strrchr(program_name, '/');
+    command_name = (command_name != NULL) ? command_name + 1 : program_name;
+
+    printf("FTP-PRO Server v1.0\n\n");
+    printf("Uso: sudo %s [opciones]\n\n", command_name);
+    printf("Opciones:\n");
+    printf("  --ip <direccion>  IP local IPv4 donde escuchar (por defecto: 127.0.0.1)\n");
+    printf("  --no-auth         No requiere autenticación (menos seguro)\n");
+    printf("  --basic           Acepta cualquier usuario (seguridad media)\n");
+    printf("  --secure          Autentica contra usuarios del sistema (más seguro)\n");
+    printf("  --help            Muestra esta ayuda\n\n");
+    printf("Ejemplos:\n");
+    printf("  sudo %s\n", command_name);
+    printf("  sudo %s --ip 127.0.0.1\n", command_name);
+    printf("  sudo %s --ip 192.168.1.100 --secure\n\n", command_name);
+    printf("Advertencia: 0.0.0.0 y direcciones no locales muestran una advertencia y pueden exponer el servicio.\n");
+    printf("Por defecto: --basic y --ip 127.0.0.1\n");
+}
+
+int is_local_ipv4(const struct in_addr* address) {
+    unsigned int ip = ntohl(address->s_addr);
+    unsigned int first_octet = (ip >> 24) & 0xFF;
+    unsigned int second_octet = (ip >> 16) & 0xFF;
+
+    if (ip == INADDR_ANY) {
+        return 0;
+    }
+
+    if (first_octet == 127 || first_octet == 10) {
+        return 1;
+    }
+
+    if (first_octet == 172 && second_octet >= 16 && second_octet <= 31) {
+        return 1;
+    }
+
+    if (first_octet == 192 && second_octet == 168) {
+        return 1;
+    }
+
+    if (first_octet == 169 && second_octet == 254) {
+        return 1;
+    }
+
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_addr_len;
     int client_socket;
     pthread_t thread_id;
+    struct in_addr listen_addr;
+
+    if (inet_pton(AF_INET, configured_listen_ip, &listen_addr) != 1) {
+        fprintf(stderr, COLOR_RED "✗ Error interno: IP por defecto inválida: %s\n" COLOR_RESET, configured_listen_ip);
+        return EXIT_FAILURE;
+    }
 
     // Parsear argumentos
-    if (argc > 1) {
-        if (strcmp(argv[1], "--secure") == 0) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--secure") == 0) {
             security_mode = SECURITY_MODE_SECURE;
-        } else if (strcmp(argv[1], "--basic") == 0) {
+        } else if (strcmp(argv[i], "--basic") == 0) {
             security_mode = SECURITY_MODE_BASIC;
-        } else if (strcmp(argv[1], "--no-auth") == 0) {
+        } else if (strcmp(argv[i], "--no-auth") == 0) {
             security_mode = SECURITY_MODE_NONE;
-        } else if (strcmp(argv[1], "--help") == 0) {
-            printf("FTP-PRO Server v1.0\n\n");
-            printf("Uso: sudo ftp_server [opciones]\n\n");
-            printf("Opciones de seguridad:\n");
-            printf("  --no-auth    No requiere autenticación (menos seguro)\n");
-            printf("  --basic      Acepta cualquier usuario (seguridad media)\n");
-            printf("  --secure     Autentica contra usuarios del sistema (más seguro)\n");
-            printf("  --help       Muestra esta ayuda\n\n");
-            printf("Por defecto: --basic (seguridad media)\n");
+        } else if (strcmp(argv[i], "--ip") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, COLOR_RED "✗ Error: falta la dirección IP después de --ip\n" COLOR_RESET);
+                print_usage(argv[0]);
+                return EXIT_FAILURE;
+            }
+
+            if (inet_pton(AF_INET, argv[i + 1], &listen_addr) != 1) {
+                fprintf(stderr, COLOR_RED "✗ Error: IP inválida '%s'\n" COLOR_RESET, argv[i + 1]);
+                fprintf(stderr, "Usa una dirección IPv4 válida, por ejemplo 127.0.0.1 o 192.168.1.100\n");
+                return EXIT_FAILURE;
+            }
+
+            strncpy(configured_listen_ip, argv[i + 1], sizeof(configured_listen_ip) - 1);
+            configured_listen_ip[sizeof(configured_listen_ip) - 1] = '\0';
+            i++;
+        } else if (strcmp(argv[i], "--help") == 0) {
+            print_usage(argv[0]);
             return EXIT_SUCCESS;
+        } else {
+            fprintf(stderr, COLOR_RED "✗ Error: opción desconocida '%s'\n" COLOR_RESET, argv[i]);
+            print_usage(argv[0]);
+            return EXIT_FAILURE;
         }
+    }
+
+    if (listen_addr.s_addr == htonl(INADDR_ANY)) {
+        fprintf(stderr, COLOR_YELLOW "⚠ Advertencia: 0.0.0.0 expone el servidor en todas las interfaces.\n" COLOR_RESET);
+    } else if (!is_local_ipv4(&listen_addr)) {
+        fprintf(stderr, COLOR_YELLOW "⚠ Advertencia: %s no parece una IP local/privada.\n" COLOR_RESET, configured_listen_ip);
     }
 
     // Configurar manejador de señales
@@ -205,12 +285,16 @@ int main(int argc, char* argv[]) {
     // Configurar dirección del servidor
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_addr.sin_addr = listen_addr;
     server_addr.sin_port = htons(FTP_PORT);
 
     // Bind
     if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        fprintf(stderr, COLOR_RED "✗ Error en bind - Puerto 21 requiere privilegios de root\n" COLOR_RESET);
+        if (errno == EACCES) {
+            fprintf(stderr, COLOR_RED "✗ Error en bind para %s:%d - se requieren privilegios de root para el puerto 21\n" COLOR_RESET, configured_listen_ip, FTP_PORT);
+        } else {
+            fprintf(stderr, COLOR_RED "✗ Error en bind para %s:%d\n" COLOR_RESET, configured_listen_ip, FTP_PORT);
+        }
         perror("Error en bind");
         close(server_socket);
         exit(EXIT_FAILURE);
@@ -227,7 +311,9 @@ int main(int argc, char* argv[]) {
     printf(COLOR_GREEN BOLD "✓ " COLOR_RESET COLOR_GREEN "Servidor FTP iniciado en puerto %d\n" COLOR_RESET, FTP_PORT);
     printf(COLOR_CYAN "╔════════════════════════════════════════════════════╗\n" COLOR_RESET);
     printf(COLOR_CYAN "║ " COLOR_GREEN "🟢 Estado: ACTIVO" COLOR_CYAN "                                  ║\n" COLOR_RESET);
-    printf(COLOR_CYAN "║ " COLOR_YELLOW "Escuchando en: 0.0.0.0:21" COLOR_CYAN "                       ║\n" COLOR_RESET);
+    printf(COLOR_CYAN "║ " COLOR_YELLOW "Escuchando en: %s:%d" COLOR_CYAN, configured_listen_ip, FTP_PORT);
+    for (int i = strlen(configured_listen_ip) + 3; i < 31; i++) printf(" ");
+    printf("║\n" COLOR_RESET);
     printf(COLOR_CYAN "║ " COLOR_YELLOW "Esperando conexiones..." COLOR_CYAN "                         ║\n" COLOR_RESET);
     printf(COLOR_CYAN "╚════════════════════════════════════════════════════╝\n" COLOR_RESET);
     printf("\n");
