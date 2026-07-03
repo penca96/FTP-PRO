@@ -50,7 +50,7 @@ COLOR_RESET;
 const char* PRO_BANNER = COLOR_GREEN BOLD
 "  ╔════════════════════════════════════════╗\n"
 "  ║         FTP-PRO v1.0 SERVER            ║\n"
-"  ║    Professional FTP Server for Linux    ║\n"
+"  ║    Professional FTP Server for Linux   ║\n"
 "  ╚════════════════════════════════════════╝\n"
 COLOR_RESET;
 
@@ -73,7 +73,7 @@ COLOR_RESET;
 static const char SHUTDOWN_ASCII[] = COLOR_YELLOW BOLD
 "  ╔════════════════════════════════════════╗\n"
 "  ║  Server shutting down gracefully...    ║\n"
-"  ║  Goodbye! 👋                           ║\n"
+"  ║  Goodbye!                              ║\n"
 "  ╚════════════════════════════════════════╝\n"
 COLOR_RESET;
 
@@ -123,40 +123,39 @@ int validate_path(client_t* client, const char* path);
 int verify_system_user(const char* username, const char* password);
 int is_safe_filename(const char* filename);
 int is_local_ipv4(const struct in_addr* address);
+int join_path(char* buffer, size_t buffer_size, const char* base, const char* path);
+void print_boxed_line(const char* content);
 
 void print_banner(void) {
-    system("clear");
+    char line[64];
+
+    printf("\033[H\033[2J\033[3J");
     printf("%s\n", BANNER);
     printf("%s\n", PRO_BANNER);
     printf(COLOR_CYAN "╔════════════════════════════════════════════════════╗\n" COLOR_RESET);
-    printf(COLOR_CYAN "║ " COLOR_GREEN "⚙️  Server Configuration" COLOR_CYAN "                         ║\n" COLOR_RESET);
-    printf(COLOR_CYAN "║ " COLOR_YELLOW "Port:" COLOR_RESET " 21 (FTP Standard)                      " COLOR_CYAN "║\n" COLOR_RESET);
-    printf(COLOR_CYAN "║ " COLOR_YELLOW "Protocol:" COLOR_RESET " FTP (RFC 959)                       " COLOR_CYAN "║\n" COLOR_RESET);
-    printf(COLOR_CYAN "║ " COLOR_YELLOW "Max Clients:" COLOR_RESET " Unlimited (Multi-threaded)        " COLOR_CYAN "║\n" COLOR_RESET);
-    printf(COLOR_CYAN "║ " COLOR_YELLOW "Bind IP:" COLOR_RESET " %s" COLOR_CYAN, configured_listen_ip);
-    for (int i = strlen(configured_listen_ip); i < 34; i++) printf(" ");
-    printf("║\n" COLOR_RESET);
-    printf(COLOR_CYAN "║ " COLOR_YELLOW "Root Directory:" COLOR_RESET " /tmp                            " COLOR_CYAN "║\n" COLOR_RESET);
+    print_boxed_line("Server Configuration");
+    print_boxed_line("Port: 21 (FTP Standard)");
+    print_boxed_line("Protocol: FTP (RFC 959)");
+    print_boxed_line("Max Clients: Unlimited (Multi-threaded)");
+    snprintf(line, sizeof(line), "Bind IP: %s", configured_listen_ip);
+    print_boxed_line(line);
+    print_boxed_line("Root Directory: /tmp");
     
     // Mostrar modo de seguridad
     const char* security_text = "Unknown";
-    const char* security_icon = "❓";
     if (security_mode == SECURITY_MODE_NONE) {
         security_text = "NONE (No authentication)";
-        security_icon = "🔓";
     } else if (security_mode == SECURITY_MODE_BASIC) {
         security_text = "BASIC (Any user accepted)";
-        security_icon = "🔐";
     } else if (security_mode == SECURITY_MODE_SECURE) {
         security_text = "SECURE (System users)";
-        security_icon = "🔒";
     }
-    printf(COLOR_CYAN "║ " COLOR_YELLOW "Security:" COLOR_RESET " %s %s" COLOR_CYAN, security_icon, security_text);
-    for (int i = strlen(security_text) + 2; i < 40; i++) printf(" ");
-    printf("║\n" COLOR_RESET);
+    snprintf(line, sizeof(line), "Security: %s", security_text);
+    print_boxed_line(line);
     
     printf(COLOR_CYAN "╚════════════════════════════════════════════════════╝\n" COLOR_RESET);
     printf("\n");
+    fflush(stdout);
 }
 
 void print_usage(const char* program_name) {
@@ -310,11 +309,11 @@ int main(int argc, char* argv[]) {
 
     printf(COLOR_GREEN BOLD "✓ " COLOR_RESET COLOR_GREEN "Servidor FTP iniciado en puerto %d\n" COLOR_RESET, FTP_PORT);
     printf(COLOR_CYAN "╔════════════════════════════════════════════════════╗\n" COLOR_RESET);
-    printf(COLOR_CYAN "║ " COLOR_GREEN "🟢 Estado: ACTIVO" COLOR_CYAN "                                  ║\n" COLOR_RESET);
-    printf(COLOR_CYAN "║ " COLOR_YELLOW "Escuchando en: %s:%d" COLOR_CYAN, configured_listen_ip, FTP_PORT);
-    for (int i = strlen(configured_listen_ip) + 3; i < 31; i++) printf(" ");
-    printf("║\n" COLOR_RESET);
-    printf(COLOR_CYAN "║ " COLOR_YELLOW "Esperando conexiones..." COLOR_CYAN "                         ║\n" COLOR_RESET);
+    print_boxed_line("Estado: ACTIVO");
+    char listen_line[64];
+    snprintf(listen_line, sizeof(listen_line), "Escuchando en: %s:%d", configured_listen_ip, FTP_PORT);
+    print_boxed_line(listen_line);
+    print_boxed_line("Esperando conexiones...");
     printf(COLOR_CYAN "╚════════════════════════════════════════════════════╝\n" COLOR_RESET);
     printf("\n");
 
@@ -540,7 +539,6 @@ void cmd_help(client_t* client) {
 }
 
 void cmd_secinfo(client_t* client) {
-    char secinfo[BUFFER_SIZE];
     const char* mode_desc = "Unknown";
     
     if (security_mode == SECURITY_MODE_NONE) {
@@ -551,15 +549,12 @@ void cmd_secinfo(client_t* client) {
         mode_desc = "SECURE - System user authentication";
     }
     
-    snprintf(secinfo, BUFFER_SIZE,
-        COLOR_YELLOW "Security Information:\n"
-        "  Mode: %s\n"
-        "  User: %s\n"
-        "  Root: %s\n"
-        COLOR_RESET, mode_desc, client->auth.username, client->root_dir);
-    
     send_response(client->socket, 214, "Security info follows");
-    send(client->socket, secinfo, strlen(secinfo), 0);
+    send(client->socket, COLOR_YELLOW "Security Information:\n", strlen(COLOR_YELLOW "Security Information:\n"), 0);
+    dprintf(client->socket, "  Mode: %s\n", mode_desc);
+    dprintf(client->socket, "  User: %s\n", client->auth.username);
+    dprintf(client->socket, "  Root: %s\n", client->root_dir);
+    send(client->socket, COLOR_RESET, strlen(COLOR_RESET), 0);
 }
 
 int validate_path(client_t* client, const char* path) {
@@ -571,7 +566,9 @@ int validate_path(client_t* client, const char* path) {
         strncpy(full_path, path, sizeof(full_path) - 1);
         full_path[sizeof(full_path) - 1] = '\0';
     } else {
-        snprintf(full_path, sizeof(full_path), "%s/%s", client->working_dir, path);
+        if (!join_path(full_path, sizeof(full_path), client->working_dir, path)) {
+            return 0;
+        }
     }
     
     // Resolver puntos relativos
@@ -585,6 +582,15 @@ int validate_path(client_t* client, const char* path) {
     }
     
     return 1;
+}
+
+int join_path(char* buffer, size_t buffer_size, const char* base, const char* path) {
+    int written = snprintf(buffer, buffer_size, "%s/%s", base, path);
+    return written >= 0 && (size_t)written < buffer_size;
+}
+
+void print_boxed_line(const char* content) {
+    printf(COLOR_CYAN "║ %-50s ║\n" COLOR_RESET, content);
 }
 
 int verify_system_user(const char* username, const char* password) {
@@ -627,7 +633,9 @@ void cmd_list(client_t* client) {
     char response[BUFFER_SIZE];
 
     while ((entry = readdir(dir)) != NULL) {
-        snprintf(filepath, BUFFER_SIZE, "%s/%s", client->working_dir, entry->d_name);
+        if (!join_path(filepath, sizeof(filepath), client->working_dir, entry->d_name)) {
+            continue;
+        }
         stat(filepath, &file_stat);
 
         char perms[11] = "----------";
@@ -653,7 +661,10 @@ void cmd_cwd(client_t* client, const char* args) {
         strncpy(new_path, args, sizeof(new_path) - 1);
         new_path[sizeof(new_path) - 1] = '\0';
     } else {
-        snprintf(new_path, BUFFER_SIZE, "%s/%s", client->working_dir, args);
+        if (!join_path(new_path, sizeof(new_path), client->working_dir, args)) {
+            send_response(client->socket, 550, "Path too long");
+            return;
+        }
     }
 
     if (access(new_path, F_OK) == 0) {
@@ -671,9 +682,12 @@ void cmd_cwd(client_t* client, const char* args) {
 }
 
 void cmd_pwd(client_t* client) {
-    char response[BUFFER_SIZE];
-    snprintf(response, BUFFER_SIZE, "257 \"%s\" is current directory", client->working_dir);
-    send_response(client->socket, 257, response + 4);
+    if (strnlen(client->working_dir, sizeof(client->working_dir)) > BUFFER_SIZE - 28) {
+        send_response(client->socket, 550, "Current directory path too long");
+        return;
+    }
+
+    dprintf(client->socket, "257 \"%s\" is current directory\r\n", client->working_dir);
 }
 
 void cmd_retr(client_t* client, const char* filename) {
@@ -683,7 +697,10 @@ void cmd_retr(client_t* client, const char* filename) {
     }
     
     char filepath[BUFFER_SIZE];
-    snprintf(filepath, BUFFER_SIZE, "%s/%s", client->working_dir, filename);
+    if (!join_path(filepath, sizeof(filepath), client->working_dir, filename)) {
+        send_response(client->socket, 550, "Path too long");
+        return;
+    }
 
     // Validar path en modo seguro
     if (security_mode == SECURITY_MODE_SECURE && !validate_path(client, filepath)) {
@@ -717,7 +734,10 @@ void cmd_stor(client_t* client, const char* filename) {
     }
     
     char filepath[BUFFER_SIZE];
-    snprintf(filepath, BUFFER_SIZE, "%s/%s", client->working_dir, filename);
+    if (!join_path(filepath, sizeof(filepath), client->working_dir, filename)) {
+        send_response(client->socket, 550, "Path too long");
+        return;
+    }
 
     // Validar path en modo seguro
     if (security_mode == SECURITY_MODE_SECURE && !validate_path(client, filepath)) {
@@ -744,7 +764,10 @@ void cmd_dele(client_t* client, const char* filename) {
     }
     
     char filepath[BUFFER_SIZE];
-    snprintf(filepath, BUFFER_SIZE, "%s/%s", client->working_dir, filename);
+    if (!join_path(filepath, sizeof(filepath), client->working_dir, filename)) {
+        send_response(client->socket, 550, "Path too long");
+        return;
+    }
 
     if (remove(filepath) == 0) {
         send_response(client->socket, 250, "File deleted");
@@ -755,7 +778,10 @@ void cmd_dele(client_t* client, const char* filename) {
 
 void cmd_rmd(client_t* client, const char* dirname) {
     char dirpath[BUFFER_SIZE];
-    snprintf(dirpath, BUFFER_SIZE, "%s/%s", client->working_dir, dirname);
+    if (!join_path(dirpath, sizeof(dirpath), client->working_dir, dirname)) {
+        send_response(client->socket, 550, "Path too long");
+        return;
+    }
 
     if (rmdir(dirpath) == 0) {
         send_response(client->socket, 250, "Directory deleted");
@@ -766,7 +792,10 @@ void cmd_rmd(client_t* client, const char* dirname) {
 
 void cmd_mkd(client_t* client, const char* dirname) {
     char dirpath[BUFFER_SIZE];
-    snprintf(dirpath, BUFFER_SIZE, "%s/%s", client->working_dir, dirname);
+    if (!join_path(dirpath, sizeof(dirpath), client->working_dir, dirname)) {
+        send_response(client->socket, 550, "Path too long");
+        return;
+    }
 
     if (mkdir(dirpath, 0755) == 0) {
         send_response(client->socket, 257, "Directory created");
